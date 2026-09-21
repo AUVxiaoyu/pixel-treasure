@@ -84,6 +84,31 @@
     font-weight:bold;cursor:pointer;box-shadow:0 4px 0 #b98a2c;
   }
   .card button:active{transform:translateY(2px);box-shadow:0 2px 0 #b98a2c;}
+  .card button.alt{background:#3a4150;color:var(--text);box-shadow:0 4px 0 #1a1d26;margin-left:8px;}
+  .card button.alt:active{box-shadow:0 2px 0 #1a1d26;}
+
+  /* 模式选择界面 */
+  #menu{
+    position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:20px;text-align:center;
+    background:radial-gradient(circle at 50% 28%,#161d30,#07090f 75%);
+    padding:20px;overflow-y:auto;
+  }
+  #menu h1{font-size:42px;margin:0;color:var(--accent);letter-spacing:4px;
+    text-shadow:0 0 20px rgba(255,209,102,.4);}
+  #menu .sub{opacity:.72;font-size:14px;margin:0;letter-spacing:2px;}
+  .mode-grid{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;}
+  .mode-card{
+    width:184px;padding:22px 16px;cursor:pointer;background:var(--panel);
+    border:2px solid var(--border);border-radius:14px;box-shadow:0 5px 0 rgba(0,0,0,.3);
+    transition:transform .12s,border-color .12s,box-shadow .12s;
+  }
+  .mode-card:hover,.mode-card:active{transform:translateY(-4px);border-color:var(--accent);box-shadow:0 8px 0 rgba(0,0,0,.35);}
+  .mode-card .m-emoji{font-size:36px;display:block;margin-bottom:8px;}
+  .mode-card .m-name{font-size:18px;font-weight:bold;color:var(--text);margin-bottom:5px;}
+  .mode-card .m-desc{font-size:12px;opacity:.72;line-height:1.5;}
+  .mode-card .m-best{font-size:12px;color:var(--accent2);margin-top:9px;min-height:15px;}
+  #menu .foot{font-size:12px;opacity:.5;}
 
   @media (pointer:coarse){#pad{display:grid;}}
 </style>
@@ -92,7 +117,8 @@
 <canvas id="c"></canvas>
 
 <div id="hud">
-  <span class="stat"><span class="gem"></span><span>宝石</span><span id="progress">0 / 8</span></span>
+  <span class="stat"><span class="gem"></span><span>宝石</span> <b id="progress">0</b></span>
+  <span class="stat" id="score" title="分数">⭐ <b id="score-val">0</b></span>
   <span class="stat" id="hp" title="生命值">♥♥♥</span>
   <span class="stat" id="keys" title="钥匙">🔑 0</span>
   <span class="stat" id="timer">⏱ 180</span>
@@ -100,6 +126,33 @@
 </div>
 <button id="hud-sound" title="静音 (M)">🔊</button>
 <canvas id="minimap"></canvas>
+
+<!-- 模式选择 -->
+<div id="menu">
+  <h1>像素寻宝</h1>
+  <p class="sub">随机地牢 · 选择一种玩法</p>
+  <div class="mode-grid">
+    <div class="mode-card" data-mode="treasure">
+      <span class="m-emoji">💎</span>
+      <div class="m-name">寻宝模式</div>
+      <div class="m-desc">收集全部宝石，躲避怪物与陷阱</div>
+      <div class="m-best" data-best="treasure"></div>
+    </div>
+    <div class="mode-card" data-mode="rush">
+      <span class="m-emoji">⏱</span>
+      <div class="m-name">极速模式</div>
+      <div class="m-desc">60 秒内疯狂收集宝石，刷新纪录</div>
+      <div class="m-best" data-best="rush"></div>
+    </div>
+    <div class="mode-card" data-mode="survival">
+      <span class="m-emoji">💀</span>
+      <div class="m-name">生存模式</div>
+      <div class="m-desc">怪物越来越多，坚持越久分越高</div>
+      <div class="m-best" data-best="survival"></div>
+    </div>
+  </div>
+  <p class="foot">WASD / 方向键移动 · M 静音 · R 重开</p>
+</div>
 
 <div id="pad">
   <button class="up" data-k="up">▲</button>
@@ -112,7 +165,8 @@
   <div class="card">
     <h1 id="overlay-title">✦ 任务完成 ✦</h1>
     <p id="res"></p>
-    <button id="restart">再玩一次 (R)</button>
+    <button id="restart">再来一局 (R)</button>
+    <button id="backmenu" class="alt">换模式</button>
   </div>
 </div>
 
@@ -131,18 +185,27 @@
   const BOX = 14;                    // 角色碰撞盒半宽（像素）
 
   // 游戏参数
-  const TOTAL_GEMS = 8, GROUND_GEMS = 5, CHEST_COUNT = 3, KEY_COUNT = 3, MONSTER_COUNT = 3;
-  const MAX_HP = 3, TIME_LIMIT = 180, INVINCIBLE = 1.2;
+  const MAX_HP = 3, INVINCIBLE = 1.2;
+  // 三种可选玩法配置（供模式选择界面与 setup 使用）
+  const MODES = {
+    treasure: { name:'寻宝模式', time:180, totalGems:8, groundGems:5, chests:3, keys:3, monsters:3, monsterSpeed:0, powerups:3, survival:false, rush:false },
+    rush:     { name:'极速模式', time:60, totalGems:Infinity, groundGems:5, chests:0, keys:0, monsters:2, monsterSpeed:-14, powerups:4, survival:false, rush:true },
+    survival: { name:'生存模式', time:Infinity, totalGems:Infinity, groundGems:3, chests:0, keys:0, monsters:3, monsterSpeed:0, powerups:2, survival:true, rush:false }
+  };
 
   // 地块类型
   const T_FLOOR = 0, T_WALL = 1, T_BRICK = 2, T_MOSS = 3,
         T_WOOD = 4, T_GRASS = 5, T_WATER = 6, T_LAVA = 7;
 
-  let grid, floor, items, decor, player, status = 'playing';
+  let grid, floor, items, decor, player, status = 'idle';
   let startTime = 0, walkT = 0, cam = { x: 0, y: 0 }, keys = {};
   let particles = [], lastStep = 0;
-  let hp = MAX_HP, invincible = 0, timeLeft = TIME_LIMIT, lastSec = -1;
+  let hp = MAX_HP, invincible = 0, timeLeft = 0, lastSec = -1;
   let keyCount = 0, keyItems = [], chests = [], monsters = [];
+  let mode = 'treasure', cfg = MODES.treasure, score = 0;
+  let powerups = [], boost = 0, shield = 0;
+  let survivalT = 0, survivalNext = 15;
+  const collected = () => items.filter(i => i.taken).length + chests.filter(c => c.open).length;
 
   mmCanvas.width = COLS * MM_S; mmCanvas.height = ROWS * MM_S;
 
@@ -285,10 +348,12 @@
   const gemColor = i => ['#ffd166', '#ff7b9c', '#7bc8ff', '#8eff9e', '#d89bff', '#ff9e6b'][i % 6];
 
   // ---------- 初始化一局 ----------
-  function setup() {
-    const m = generateMap();
-    grid = m.grid;
-    const f = m.floor.map(p => ({ x: p[0], y: p[1] }));
+  function setup(m) {
+    if (m) mode = m;
+    cfg = MODES[mode];
+    const gen = generateMap();
+    grid = gen.grid;
+    const f = gen.floor.map(p => ({ x: p[0], y: p[1] }));
     floor = f;
     decorate(grid);
 
@@ -317,40 +382,74 @@
 
     // 地面宝石
     items = [];
-    for (let i = 0; i < GROUND_GEMS; i++) {
+    for (let i = 0; i < cfg.groundGems; i++) {
       const p = pick(9, 6);
       items.push({ x: p.x * TILE + TILE / 2, y: p.y * TILE + TILE / 2, taken: false, color: gemColor(i), ph: Math.random() * 6 });
     }
     // 宝箱（内含宝石，需钥匙）
     chests = [];
-    for (let i = 0; i < CHEST_COUNT; i++) {
+    for (let i = 0; i < cfg.chests; i++) {
       const p = pick(10, 8);
       chests.push({ x: p.x * TILE + TILE / 2, y: p.y * TILE + TILE / 2, open: false, ph: Math.random() * 6 });
     }
     // 钥匙
     keyItems = [];
-    for (let i = 0; i < KEY_COUNT; i++) {
+    for (let i = 0; i < cfg.keys; i++) {
       const p = pick(8, 5);
       keyItems.push({ x: p.x * TILE + TILE / 2, y: p.y * TILE + TILE / 2, taken: false, ph: Math.random() * 6 });
     }
     // 怪物
     monsters = [];
-    for (let i = 0; i < MONSTER_COUNT; i++) {
+    for (let i = 0; i < cfg.monsters; i++) {
       const p = pick(12, 22);
-      monsters.push({ x: p.x * TILE + TILE / 2, y: p.y * TILE + TILE / 2, dir: 1, speed: 68 + Math.random() * 20, ph: Math.random() * 6 });
+      monsters.push({ x: p.x * TILE + TILE / 2, y: p.y * TILE + TILE / 2, dir: 1, speed: 68 + Math.random() * 20 + cfg.monsterSpeed, ph: Math.random() * 6 });
     }
+    powerups = [];
+    spawnPowerups();
 
-    hp = MAX_HP; invincible = 0; timeLeft = TIME_LIMIT; lastSec = -1;
+    hp = MAX_HP; invincible = 0; timeLeft = cfg.time; lastSec = -1;
     keyCount = 0; particles = []; status = 'playing'; walkT = 0; lastStep = 0;
+    score = 0; boost = 0; shield = 0; survivalT = 0; survivalNext = 15;
+    startTime = performance.now();
     document.getElementById('overlay').style.display = 'none';
+    document.getElementById('menu').style.display = 'none';
     updateHUDStatic();
   }
 
-  function updateHUDStatic() {
-    document.getElementById('progress').textContent = '0 / ' + TOTAL_GEMS;
+  function spawnPowerups() {
+    powerups = [];
+    const types = ['heal', 'boost', 'shield'];
+    const sx = (player.x / TILE) | 0, sy = (player.y / TILE) | 0;
+    while (powerups.length < cfg.powerups) {
+      const p = floor[(Math.random() * floor.length) | 0];
+      if (Math.abs(p.x - sx) + Math.abs(p.y - sy) < 6) continue;
+      powerups.push({ x: p.x * TILE + TILE / 2, y: p.y * TILE + TILE / 2, type: types[powerups.length % 3], ph: Math.random() * 6 });
+    }
+  }
+
+  function updateHP() {
     document.getElementById('hp').textContent = '♥'.repeat(hp) + '♡'.repeat(MAX_HP - hp);
+  }
+  function updateKeysUI() {
+    document.getElementById('keys').style.display = cfg.keys > 0 ? '' : 'none';
+  }
+  function updateTimerText() {
+    const el = document.getElementById('timer');
+    if (cfg.survival) el.textContent = '⏱ ' + Math.floor(survivalT);
+    else el.textContent = '⏱ ' + Math.max(0, Math.ceil(timeLeft));
+  }
+  function addScore(n) {
+    score += n;
+    document.getElementById('score-val').textContent = Math.floor(score);
+  }
+
+  function updateHUDStatic() {
+    document.getElementById('progress').textContent = collected();
+    document.getElementById('score-val').textContent = 0;
+    updateHP();
     document.getElementById('keys').textContent = '🔑 ' + keyCount;
-    document.getElementById('timer').textContent = '⏱ ' + TIME_LIMIT;
+    updateKeysUI();
+    updateTimerText();
   }
 
   // ---------- 碰撞 ----------
@@ -396,6 +495,18 @@
   document.getElementById('hud-sound').addEventListener('click', toggleMute);
   document.getElementById('restart').addEventListener('click', setup);
 
+  // 模式选择卡片 & 换模式按钮
+  function showMenu() {
+    status = 'idle';
+    document.getElementById('overlay').style.display = 'none';
+    document.getElementById('menu').style.display = 'flex';
+    renderBest();
+  }
+  document.querySelectorAll('.mode-card').forEach(card => {
+    card.addEventListener('click', () => { Sound.ensure(); setup(card.dataset.mode); });
+  });
+  document.getElementById('backmenu').addEventListener('click', showMenu);
+
   // ---------- 逻辑更新 ----------
   function move(dt) {
     let dx = 0, dy = 0;
@@ -406,7 +517,7 @@
     if (dx && dy) { dx *= 0.7071; dy *= 0.7071; }
     player.moving = !!(dx || dy);
 
-    const sp = 210;
+    const sp = 210 * (boost > 0 ? 1.6 : 1);
     let nx = player.x + dx * sp * dt;
     if (!collides(nx, player.y)) player.x = nx;
     let ny = player.y + dy * sp * dt;
@@ -429,18 +540,27 @@
     }
   }
 
-  const collected = () => items.filter(i => i.taken).length + chests.filter(c => c.open).length;
+  function respawnGem() {
+    const sx = (player.x / TILE) | 0, sy = (player.y / TILE) | 0;
+    for (let t = 0; t < 200; t++) {
+      const p = floor[(Math.random() * floor.length) | 0];
+      if (Math.abs(p.x - sx) + Math.abs(p.y - sy) < 8) continue;
+      if (items.some(i => !i.taken && ((i.x / TILE) | 0) === p.x && ((i.y / TILE) | 0) === p.y)) continue;
+      items.push({ x: p.x * TILE + TILE / 2, y: p.y * TILE + TILE / 2, taken: false, color: gemColor((Math.random() * 6) | 0), ph: Math.random() * 6 });
+      return;
+    }
+  }
 
   function checkItems() {
     for (const it of items) {
       if (it.taken) continue;
       const ddx = it.x - player.x, ddy = it.y - player.y;
-      if (ddx * ddx + ddy * ddy < 22 * 22) { it.taken = true; Sound.pickup(); spawnBurst(it.x, it.y, it.color); }
+      if (ddx * ddx + ddy * ddy < 22 * 22) { it.taken = true; Sound.pickup(); spawnBurst(it.x, it.y, it.color); addScore(100); if (cfg.rush || cfg.survival) respawnGem(); }
     }
     for (const k of keyItems) {
       if (k.taken) continue;
       const ddx = k.x - player.x, ddy = k.y - player.y;
-      if (ddx * ddx + ddy * ddy < 20 * 20) { k.taken = true; keyCount++; Sound.key(); spawnBurst(k.x, k.y, '#50e0c0'); document.getElementById('keys').textContent = '🔑 ' + keyCount; }
+      if (ddx * ddx + ddy * ddy < 20 * 20) { k.taken = true; keyCount++; Sound.key(); spawnBurst(k.x, k.y, '#50e0c0'); addScore(50); document.getElementById('keys').textContent = '🔑 ' + keyCount; }
     }
     // 宝箱：靠近且有钥匙才开启
     for (const c of chests) {
@@ -448,15 +568,16 @@
       const ddx = c.x - player.x, ddy = c.y - player.y;
       if (ddx * ddx + ddy * ddy < 22 * 22) {
         if (keyCount > 0) {
-          c.open = true; keyCount--; Sound.chest(); spawnBurst(c.x, c.y, '#ffd166');
+          c.open = true; keyCount--; Sound.chest(); spawnBurst(c.x, c.y, '#ffd166'); addScore(150);
           document.getElementById('keys').textContent = '🔑 ' + keyCount;
         } else {
           hint('木箱锁住了，需要一把 🔑');
         }
       }
     }
-    document.getElementById('progress').textContent = collected() + ' / ' + TOTAL_GEMS;
-    if (collected() >= TOTAL_GEMS) endGame('win', '用时 ' + ((performance.now() - startTime) / 1000).toFixed(1) + ' 秒，找齐全部 ' + TOTAL_GEMS + ' 颗宝石！');
+    document.getElementById('progress').textContent = collected();
+    if (!cfg.survival && cfg.totalGems !== Infinity && collected() >= cfg.totalGems)
+      endGame('win', '用时 ' + ((performance.now() - startTime) / 1000).toFixed(1) + ' 秒，找齐全部 ' + cfg.totalGems + ' 颗宝石！');
   }
 
   function updateMonsters(dt) {
@@ -484,29 +605,96 @@
 
   function hurt() {
     if (invincible > 0 || status !== 'playing') return;
+    if (shield > 0) { shield = 0; spawnBurst(player.x, player.y, '#7bc8ff'); hint('护盾抵挡了一次伤害'); return; }
     hp--; invincible = INVINCIBLE; Sound.hurt();
-    document.getElementById('hp').textContent = '♥'.repeat(hp) + '♡'.repeat(MAX_HP - hp);
-    if (hp <= 0) endGame('lose', '你在冒险中倒下了，宝石还剩下 ' + (TOTAL_GEMS - collected()) + ' 颗未收集。');
+    updateHP();
+    if (hp <= 0) endGame('lose', '你倒下了，坚持了 ' + Math.floor((performance.now() - startTime) / 1000) + ' 秒，得分 ' + Math.floor(score) + '。');
+  }
+
+  function checkPowerups() {
+    for (let i = powerups.length - 1; i >= 0; i--) {
+      const pu = powerups[i];
+      const ddx = pu.x - player.x, ddy = pu.y - player.y;
+      if (ddx * ddx + ddy * ddy < 20 * 20) {
+        if (pu.type === 'heal') { if (hp < MAX_HP) { hp++; updateHP(); } }
+        else if (pu.type === 'boost') { boost = 6; }
+        else if (pu.type === 'shield') { shield = 8; }
+        addScore(50); Sound.key();
+        spawnBurst(pu.x, pu.y, pu.type === 'heal' ? '#ff4d6d' : pu.type === 'boost' ? '#ffd166' : '#7bc8ff');
+        hint(pu.type === 'heal' ? '＋ 生命' : pu.type === 'boost' ? '＋ 加速 6 秒' : '＋ 护盾 8 秒');
+        powerups.splice(i, 1);
+      }
+    }
+  }
+
+  function updatePowerups(dt) {
+    if (boost > 0) { boost -= dt; if (boost <= 0) boost = 0; }
+    if (shield > 0) { shield -= dt; if (shield <= 0) shield = 0; }
   }
 
   function updateTimer(dt) {
-    timeLeft -= dt;
-    const sec = Math.ceil(timeLeft);
-    if (sec !== lastSec) {
-      lastSec = sec;
-      const el = document.getElementById('timer');
-      el.textContent = '⏱ ' + Math.max(0, sec);
-      el.style.color = sec <= 30 ? '#ff6b6b' : '';
+    if (cfg.survival) {
+      survivalT += dt;
+      addScore(dt); // 生存模式按存活时长加分（约 1 分/秒）
+      const sec = Math.floor(survivalT);
+      if (sec !== lastSec) {
+        lastSec = sec;
+        document.getElementById('timer').textContent = '⏱ ' + sec;
+      }
+      if (sec >= survivalNext) {
+        survivalNext += 15;
+        const sx = (player.x / TILE) | 0, sy = (player.y / TILE) | 0;
+        for (let t = 0; t < 100; t++) {
+          const p = floor[(Math.random() * floor.length) | 0];
+          if (Math.abs(p.x - sx) + Math.abs(p.y - sy) < 10) continue;
+          monsters.push({ x: p.x * TILE + TILE / 2, y: p.y * TILE + TILE / 2, dir: 1, speed: 70 + Math.random() * 30 + Math.min(60, survivalT * 0.6), ph: Math.random() * 6 });
+          break;
+        }
+        hint('⚠ 怪物变多了！');
+      }
+    } else {
+      timeLeft -= dt;
+      const sec = Math.ceil(timeLeft);
+      if (sec !== lastSec) {
+        lastSec = sec;
+        const el = document.getElementById('timer');
+        el.textContent = '⏱ ' + Math.max(0, sec);
+        el.style.color = sec <= 30 ? '#ff6b6b' : '';
+      }
+      if (timeLeft <= 0) {
+        if (cfg.rush) endGame('win', '时间到！本局收集 ' + collected() + ' 颗宝石，得分 ' + Math.floor(score) + '。');
+        else endGame('lose', '时间用完了！还剩 ' + (cfg.totalGems - collected()) + ' 颗宝石未收集。');
+      }
     }
-    if (timeLeft <= 0) endGame('lose', '时间用完了！还剩 ' + (TOTAL_GEMS - collected()) + ' 颗宝石未收集。');
   }
 
   function hint(msg) { document.getElementById('hint').textContent = msg; }
 
+  function bestOf(m) {
+    try { return parseInt(localStorage.getItem('pixel_hunt_best_' + m) || '0', 10); } catch (e) { return 0; }
+  }
+  function saveBest() {
+    const key = 'pixel_hunt_best_' + mode;
+    const val = Math.max(bestOf(mode), Math.floor(score));
+    try { localStorage.setItem(key, String(val)); } catch (e) {}
+    return val;
+  }
+  function renderBest() {
+    document.querySelectorAll('.m-best').forEach(el => {
+      const b = bestOf(el.dataset.best);
+      el.textContent = b > 0 ? ('最高 ' + b) : '';
+    });
+  }
+
   function endGame(kind, text) {
     if (status !== 'playing') return;
     status = kind;
-    document.getElementById('res').textContent = text;
+    const prev = bestOf(mode);
+    saveBest();
+    let extra = '';
+    if (Math.floor(score) > prev && score > 0) extra = '  🎉新纪录！';
+    else if (prev > 0) extra = '  历史最高 ' + prev + ' 分';
+    document.getElementById('res').textContent = text + extra;
     const card = document.querySelector('#overlay .card');
     card.classList.toggle('lose', kind === 'lose');
     document.getElementById('overlay-title').textContent = kind === 'win' ? '✦ 任务完成 ✦' : '☠ 游戏结束';
@@ -750,6 +938,18 @@
     ctx.restore();
   }
 
+  // 角色手持提灯的光晕（照亮四周）
+  function drawPlayerLight(cx, cy, t) {
+    const sx = clamp(player.x - cx, 0, canvas.width), sy = clamp(player.y - cy, 0, canvas.height);
+    const r = 96 + Math.sin(t / 500) * 8;
+    const g = ctx.createRadialGradient(sx, sy, 12, sx, sy, r);
+    g.addColorStop(0, 'rgba(255,214,130,.20)');
+    g.addColorStop(0.55, 'rgba(255,190,110,.07)');
+    g.addColorStop(1, 'rgba(255,170,90,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(sx - r, sy - r, r * 2, r * 2);
+  }
+
   function drawVignette() {
     const g = ctx.createRadialGradient(canvas.width / 2, canvas.height / 2, Math.min(canvas.width, canvas.height) * 0.35,
       canvas.width / 2, canvas.height / 2, Math.max(canvas.width, canvas.height) * 0.75);
@@ -813,6 +1013,7 @@
 
     for (const m of monsters) drawMonster(m, cx, cy, t);
     drawPlayer(cx, cy, t);
+    drawPlayerLight(cx, cy, t);
     drawVignette();
     if (status === 'playing') drawHint(cx, cy);
     drawMinimap();
@@ -845,6 +1046,7 @@
     requestAnimationFrame(loop);
   }
 
+  renderBest();
   setup();
   requestAnimationFrame(loop);
 })();
